@@ -1,12 +1,12 @@
 {
-	"name": "llama-vscode-chat-local",
-	"publisher": "llama",
-	"displayName": "Llama.cpp Provider for GitHub Copilot Chat (Local)",
+	"name": "llama-vscode-chat",
+	"publisher": "cturan",
+	"displayName": "Llama.cpp Provider for GitHub Copilot Chat",
 	"description": "A local Llama.cpp provider for GitHub Copilot Chat",
 	"icon": "assets/logo.png",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/mbeps/llama-vscode-chat"
+		"url": "https://github.com/cturan/llama-vscode-chat"
 	},
 	"version": "1.0.0",
 	"engines": {
@@ -21,9 +21,9 @@
 		"theme": "dark"
 	},
 	"badges": [],
-	"homepage": "https://github.com/mbeps/llama-vscode-chat",
+	"homepage": "https://github.com/cturan/llama-vscode-chat",
 	"bugs": {
-		"url": "https://github.com/mbeps/llama-vscode-chat/issues"
+		"url": "https://github.com/cturan/llama-vscode-chat/issues"
 	},
 	"license": "MIT",
 	"contributes": {
