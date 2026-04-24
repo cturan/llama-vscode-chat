@@ -1,14 +1,14 @@
 {
-	"name": "llama-vscode-chat",
-	"publisher": "maruf-bepary",
-	"displayName": "Llama.cpp Provider for GitHub Copilot Chat",
-	"description": "An extension that integrates Llama.cpp into GitHub Copilot Chat",
+	"name": "llama-vscode-chat-local",
+	"publisher": "llama",
+	"displayName": "Llama.cpp Provider for GitHub Copilot Chat (Local)",
+	"description": "A local Llama.cpp provider for GitHub Copilot Chat",
 	"icon": "assets/logo.png",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/mbeps/llama-vscode-chat"
 	},
-	"version": "0.1.1",
+	"version": "1.0.0",
 	"engines": {
 		"vscode": "^1.104.0"
 	},

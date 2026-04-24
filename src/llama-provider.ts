@@ -46,26 +46,89 @@ export class LlamaCppChatModelProvider extends BaseChatModelProvider {
         const apiKey = await this.getApiKey(); // Optional
 
         try {
-            const models = await this.fetchModels(serverUrl, apiKey);
-            return models.map(model => ({
-                id: model.id,
-                name: model.id, // Llama.cpp usually returns filename as ID
-                tooltip: `Llama.cpp model: ${model.id}`,
-                family: "llama-cpp",
-                version: "1.0.0",
-                maxInputTokens: DEFAULT_CONTEXT_LENGTH - DEFAULT_MAX_OUTPUT_TOKENS, // Rough estimate or configurable
-                maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
-                capabilities: {
-                    toolCalling: true, // Assuming modern models support it
-                    imageInput: false, // Could be true for vision models, but safe default is false
-                },
-            }));
+            const [models, props] = await Promise.all([
+                this.fetchModels(serverUrl, apiKey),
+                this.fetchProps(serverUrl, apiKey).catch(() => undefined),
+            ]);
+
+            // Prefer the server's actually loaded context window (n_ctx from /props)
+            // over the model's training context length (n_ctx_train from /v1/models),
+            // because the server may be running with a reduced context.
+            const serverCtx = props?.default_generation_settings?.n_ctx;
+
+            return models.map(model => {
+                const trainCtx = model.meta?.n_ctx_train;
+                // Use the smaller of (server-loaded ctx, training ctx) when both known,
+                // otherwise fall back to whichever is available, then to the default.
+                const contextLength =
+                    typeof serverCtx === "number" && serverCtx > 0
+                        ? (typeof trainCtx === "number" && trainCtx > 0
+                              ? Math.min(serverCtx, trainCtx)
+                              : serverCtx)
+                        : typeof trainCtx === "number" && trainCtx > 0
+                          ? trainCtx
+                          : DEFAULT_CONTEXT_LENGTH;
+
+                const maxOutputTokens = Math.min(
+                    DEFAULT_MAX_OUTPUT_TOKENS,
+                    Math.max(1, Math.floor(contextLength / 4))
+                );
+                const maxInputTokens = Math.max(1, contextLength - maxOutputTokens);
+
+                const displayName = props?.model_alias && models.length === 1 ? props.model_alias : model.id;
+
+                return {
+                    id: model.id,
+                    name: displayName, // Llama.cpp usually returns filename as ID
+                    tooltip: `Llama.cpp model: ${model.id} (context: ${contextLength.toLocaleString()} tokens)`,
+                    family: "llama-cpp",
+                    version: "1.0.0",
+                    maxInputTokens,
+                    maxOutputTokens,
+                    capabilities: {
+                        toolCalling: true, // Assuming modern models support it
+                        imageInput: Boolean(props?.modalities?.vision),
+                    },
+                };
+            });
         } catch (err) {
             if (!options.silent) {
                 console.error("[Llama.cpp Provider] Failed to fetch models", err);
             }
             return []; // Return empty if failed or server not running
         }
+    }
+
+    /**
+     * Fetches server properties from the Llama.cpp /props endpoint.
+     * Provides the actual loaded context window and other runtime settings.
+     *
+     * @param serverUrl - The base URL of the Llama.cpp server.
+     * @param apiKey - Optional API key for authentication.
+     * @returns Promise resolving to the parsed props payload or undefined.
+     */
+    private async fetchProps(
+        serverUrl: string,
+        apiKey?: string
+    ): Promise<LlamaServerProps | undefined> {
+        const headers: Record<string, string> = {
+            "User-Agent": this.userAgent,
+        };
+        if (apiKey) {
+            headers["Authorization"] = `Bearer ${apiKey}`;
+        }
+
+        const response = await fetch(`${serverUrl}/props`, {
+            method: "GET",
+            headers,
+        });
+
+        if (!response.ok) {
+            // /props may be disabled on the server; treat as soft-failure.
+            return undefined;
+        }
+
+        return (await response.json()) as LlamaServerProps;
     }
 
     /**
@@ -108,7 +171,7 @@ export class LlamaCppChatModelProvider extends BaseChatModelProvider {
             model: model.id,
             messages: openaiMessages,
             stream: true,
-            max_tokens: options.modelOptions?.max_tokens || 4096,
+            max_tokens: options.modelOptions?.max_tokens ?? model.maxOutputTokens ?? 4096,
             temperature: options.modelOptions?.temperature ?? 0.7,
         };
 
@@ -180,7 +243,7 @@ export class LlamaCppChatModelProvider extends BaseChatModelProvider {
      * @param apiKey - Optional API key for authentication.
      * @returns Promise resolving to an array of model objects.
      */
-    private async fetchModels(serverUrl: string, apiKey?: string): Promise<{ id: string }[]> {
+    private async fetchModels(serverUrl: string, apiKey?: string): Promise<LlamaModelEntry[]> {
         const headers: Record<string, string> = {
              "User-Agent": this.userAgent
         };
@@ -197,7 +260,32 @@ export class LlamaCppChatModelProvider extends BaseChatModelProvider {
             throw new Error(`Failed to fetch models: ${response.status} ${response.statusText}`);
         }
 
-        const data = (await response.json()) as { data: { id: string }[] };
+        const data = (await response.json()) as { data?: LlamaModelEntry[] };
         return data.data || [];
     }
+}
+
+/**
+ * Subset of the Llama.cpp /props payload we care about.
+ */
+interface LlamaServerProps {
+    default_generation_settings?: {
+        n_ctx?: number;
+    };
+    model_alias?: string;
+    modalities?: {
+        vision?: boolean;
+        audio?: boolean;
+    };
+}
+
+/**
+ * Entry returned from Llama.cpp /v1/models.
+ * The `meta` field is a Llama.cpp extension that exposes the training context length.
+ */
+interface LlamaModelEntry {
+    id: string;
+    meta?: {
+        n_ctx_train?: number;
+    };
 }

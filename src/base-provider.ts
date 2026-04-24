@@ -100,12 +100,55 @@ export abstract class BaseChatModelProvider implements LanguageModelChatProvider
         let total = 0;
         for (const m of msgs) {
             for (const part of m.content) {
-                if (part instanceof vscode.LanguageModelTextPart) {
-                    total += Math.ceil(part.value.length / 4);
-                }
+                total += this.estimatePartTokens(part);
             }
         }
         return total;
+    }
+
+    /**
+     * Rough token estimate for a single message content part.
+     * Counts text, tool calls (name + JSON-stringified input) and tool results
+     * (recursively over their inner parts) so that the host can display an
+     * accurate Context Window indicator.
+     *
+     * @param part - A single content part from a chat message.
+     * @returns Estimated number of tokens for the part.
+     */
+    private estimatePartTokens(part: unknown): number {
+        if (part instanceof vscode.LanguageModelTextPart) {
+            return Math.ceil(part.value.length / 4);
+        }
+        if (part instanceof vscode.LanguageModelToolCallPart) {
+            let len = (part.name?.length ?? 0) + (part.callId?.length ?? 0);
+            try {
+                len += JSON.stringify(part.input ?? {}).length;
+            } catch {
+                // ignore serialization errors
+            }
+            // Add a small overhead for wrapper tokens (role markers, braces, etc.)
+            return Math.ceil(len / 4) + 4;
+        }
+        if (part instanceof vscode.LanguageModelToolResultPart) {
+            let total = Math.ceil((part.callId?.length ?? 0) / 4) + 4;
+            const content = (part as { content?: unknown[] }).content;
+            if (Array.isArray(content)) {
+                for (const inner of content) {
+                    total += this.estimatePartTokens(inner);
+                }
+            }
+            return total;
+        }
+        // Fallback: try to JSON-stringify unknown parts for a best-effort estimate.
+        try {
+            const json = JSON.stringify(part);
+            if (json) {
+                return Math.ceil(json.length / 4);
+            }
+        } catch {
+            // ignore
+        }
+        return 0;
     }
 
     /**
@@ -148,9 +191,7 @@ export abstract class BaseChatModelProvider implements LanguageModelChatProvider
         } else {
             let totalTokens = 0;
             for (const part of text.content) {
-                if (part instanceof vscode.LanguageModelTextPart) {
-                    totalTokens += Math.ceil(part.value.length / 4);
-                }
+                totalTokens += this.estimatePartTokens(part);
             }
             return totalTokens;
         }
